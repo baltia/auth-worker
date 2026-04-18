@@ -1,10 +1,10 @@
 {
-  "name": "ssso-auth",
+  "name": "baltia-auth",
   "version": "0.1.0",
   "private": true,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mastermakrela/ssso-auth-worker.git"
+    "url": "git+https://github.com/baltia/auth-worker.git"
   },
   "types": "./contracts.d.ts",
   "exports": {
