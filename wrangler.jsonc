@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "ssso-auth",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    // Synology DSM base URL, e.g. "https://sso.example.com/"
+    "BASE_URL": "",
+    // OAuth client ID registered in DSM → SSO Server → OIDC
+    "CLIENT_ID": "",
+    // Public origin of this worker, e.g. "https://auth.example.com".
+    // The cookie scope is derived from this by stripping the first DNS label.
+    "AUTH_ORIGIN": "",
+    // Comma-separated suffixes to extend the redirect allowlist at runtime
+    // (e.g. ".foo.pages.dev,.bar.example.com")
+    "EXTRA_REDIRECT_SUFFIXES": "",
+  },
+  "kv_namespaces": [
+    // Deploy-to-Cloudflare provisions a new KV namespace when `id` is absent.
+    {
+      "binding": "SESSIONS",
+    },
+  ],
+  "observability": {
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true,
+    },
+    "traces": {
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1,
+    },
+  },
+}

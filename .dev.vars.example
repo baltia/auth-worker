@@ -1,0 +1,2 @@
+# Copy to .dev.vars and fill in. Never commit .dev.vars.
+CLIENT_PASSWORD=
