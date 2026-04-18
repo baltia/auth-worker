@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "baltia-auth",
+  "name": "auth-worker",
   "account_id": "c605d712b51666faef93b68449cbc470",
   "main": "src/index.ts",
   "compatibility_date": "2025-03-01",
