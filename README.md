@@ -124,17 +124,32 @@ export default {
 
 The exchange code is **single-use** and expires after **60 seconds** — if the consumer doesn't redeem it quickly, it's gone.
 
+## Logout
+
+The auth worker can also handle logout via redirect, keeping the flow symmetric with login:
+
+```ts
+// In your consumer's fetch handler — e.g. a "/logout" route
+return Response.redirect(env.AUTH.getLogoutUrl("/"), 302);
+```
+
+The auth worker reads the `session_id` cookie, deletes the session from KV, clears the cookie, and redirects back.
+
+For programmatic revocation (no browser redirect), use `deleteSession(sessionId)` directly.
+
 ## RPC reference
 
 ```ts
 validateSession(sessionId: string, requiredGroups?: string[]): Promise<SessionValidationResult>;
 deleteSession(sessionId: string): Promise<void>;
 getLoginUrl(redirect?: string): string;
+getLogoutUrl(redirect?: string): string;
 exchangeAuthCode(code: string): Promise<{ sessionId: string; expiresInSeconds: number } | null>;
 ```
 
 - `validateSession` — `requiredGroups` is OR logic; user needs to be in at least one.
 - `getLoginUrl` — `redirect` must be on the allowlist (see below), otherwise it falls back to the auth homepage. Cookie vs. exchange mode is auto-detected from the redirect URL.
+- `getLogoutUrl` — redirects the browser to the auth worker, which clears the session cookie and deletes the KV entry.
 - `exchangeAuthCode` — returns `null` if the code is unknown, already used, or expired.
 
 ## Redirect allowlist
