@@ -1168,6 +1168,16 @@
                 </div>
                 <div class="rpc-row">
                   <div class="rpc-sig">
+                    getLogoutUrl<span class="arg">(redirect?)</span>
+                    <span class="ret">→ string</span>
+                  </div>
+                  <div class="rpc-desc">
+                    Builds a logout URL. The auth worker clears the session cookie and deletes the
+                    KV entry on visit.
+                  </div>
+                </div>
+                <div class="rpc-row">
+                  <div class="rpc-sig">
                     exchangeAuthCode<span class="arg">(code)</span>
                     <span class="ret">→ &#123; sessionId, expiresInSeconds &#125; | null</span>
                   </div>
@@ -1180,7 +1190,10 @@
                     deleteSession<span class="arg">(sessionId)</span>
                     <span class="ret">→ void</span>
                   </div>
-                  <div class="rpc-desc">Server-side logout. Drops the session from KV.</div>
+                  <div class="rpc-desc">
+                    Server-side logout. Drops the session from KV. Use for programmatic revocation
+                    without a redirect.
+                  </div>
                 </div>
               </div>
             </div>
@@ -1237,6 +1250,28 @@
                   </div>
                 </li>
               </ol>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CHANGELOG -->
+      <section class="section">
+        <div class="wrap">
+          <div class="section-head">
+            <div class="section-num">07 / Changelog</div>
+            <h2 class="section-title">What changed.</h2>
+          </div>
+          <div class="section-body">
+            <div class="col-label">2025-04-22</div>
+            <div class="col-main">
+              <p>
+                <strong>Added <code>getLogoutUrl</code></strong> to the <code>AuthService</code> RPC
+                surface. Logout is now symmetric with login: consumers redirect the browser to the
+                auth worker, which clears the cookie and deletes the session from KV.
+                <code>deleteSession</code> remains available for programmatic revocation without a
+                browser redirect.
+              </p>
             </div>
           </div>
         </div>

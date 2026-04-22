@@ -76,8 +76,9 @@ Two login flows, picked automatically by consumer origin:
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `validateSession(sessionId, requiredGroups?) → SessionValidationResult` | Verify the session; optionally check group membership (OR logic — user needs at least one).           |
 | `getLoginUrl(redirect?) → string`                                       | Build a login URL. `redirect` must match the allowlist, otherwise it falls back to the auth homepage. |
+| `getLogoutUrl(redirect?) → string`                                      | Build a logout URL. The auth worker clears the session cookie and deletes the KV entry on visit.      |
 | `exchangeAuthCode(code) → { sessionId, expiresInSeconds } \| null`      | Trade a single-use code for a session id. Codes expire after 60 seconds.                              |
-| `deleteSession(sessionId) → void`                                       | Server-side logout. Drops the session from KV.                                                        |
+| `deleteSession(sessionId) → void`                                       | Server-side logout. Drops the session from KV. Use for programmatic revocation without a redirect.    |
 
 ## 06 / Setup
 
@@ -85,6 +86,10 @@ Two login flows, picked automatically by consumer origin:
 2. **Fill the vars** in the worker dashboard (or `wrangler.jsonc` if cloned manually): `BASE_URL`, `CLIENT_ID`, `AUTH_ORIGIN`, optionally `EXTRA_REDIRECT_SUFFIXES`.
 3. **Set the secret:** `bunx wrangler secret put CLIENT_PASSWORD`.
 4. **Attach a custom domain** to the worker at `AUTH_ORIGIN`.
+
+## 07 / Changelog
+
+**2025-04-22** — Added `getLogoutUrl` to the `AuthService` RPC surface. Logout is now symmetric with login: consumers redirect the browser to the auth worker, which clears the cookie and deletes the session from KV. `deleteSession` remains available for programmatic revocation without a browser redirect.
 
 ---
 

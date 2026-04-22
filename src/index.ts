@@ -40,6 +40,12 @@ export class AuthService extends WorkerEntrypoint<Env> {
     return url.toString();
   }
 
+  getLogoutUrl(redirect?: string): string {
+    const url = new URL("/logout", this.env.AUTH_ORIGIN);
+    if (redirect) url.searchParams.set("redirect", redirect);
+    return url.toString();
+  }
+
   async exchangeAuthCode(code: string): Promise<ExchangeResult | null> {
     return consumeExchangeCode(this.env.SESSIONS, code);
   }
