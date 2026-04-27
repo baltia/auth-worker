@@ -12,12 +12,12 @@
     },
   ],
   "workers_dev": false,
-  "preview_urls": false,
+  "preview_urls": true,
   "vars": {
     "BASE_URL": "https://sso.nas.baltia.de/",
     "CLIENT_ID": "1b405d2ecfe34ad6809553aa29c6cc2e",
     "AUTH_ORIGIN": "https://auth.baltia.de",
-    "EXTRA_REDIRECT_SUFFIXES": "",
+    "EXTRA_REDIRECT_SUFFIXES": ".baltia-intern.pages.dev,typewriter.pages.dev",
   },
   "kv_namespaces": [
     {
