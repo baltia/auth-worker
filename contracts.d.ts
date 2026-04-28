@@ -22,8 +22,8 @@ export interface ExchangeResult {
 export declare class AuthService extends WorkerEntrypoint {
   validateSession(sessionId: string, requiredGroups?: string[]): Promise<SessionValidationResult>;
   deleteSession(sessionId: string): Promise<void>;
-  getLoginUrl(redirect?: string): string;
-  getLogoutUrl(redirect?: string): string;
+  getLoginUrl(redirect?: string): Promise<string>;
+  getLogoutUrl(redirect?: string): Promise<string>;
   /** Returns null if the code is unknown, consumed, or expired. */
   exchangeAuthCode(code: string): Promise<ExchangeResult | null>;
 }

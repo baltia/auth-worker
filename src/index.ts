@@ -34,13 +34,13 @@ export class AuthService extends WorkerEntrypoint<Env> {
     await deleteSessionFromKV(this.env.SESSIONS, sessionId);
   }
 
-  getLoginUrl(redirect?: string): string {
+  async getLoginUrl(redirect?: string): Promise<string> {
     const url = new URL("/login", this.env.AUTH_ORIGIN);
     if (redirect) url.searchParams.set("redirect", redirect);
     return url.toString();
   }
 
-  getLogoutUrl(redirect?: string): string {
+  async getLogoutUrl(redirect?: string): Promise<string> {
     const url = new URL("/logout", this.env.AUTH_ORIGIN);
     if (redirect) url.searchParams.set("redirect", redirect);
     return url.toString();
