@@ -1263,6 +1263,17 @@
             <h2 class="section-title">What changed.</h2>
           </div>
           <div class="section-body">
+            <div class="col-label">2026-05-11</div>
+            <div class="col-main">
+              <p>
+                <strong>Hardened <code>/callback</code> against cold NAS routes.</strong> The worker
+                now fires a warmup ping in parallel with the OAuth state lookup, retries the token
+                exchange once on failure, and on persistent failure shows a styled
+                <em>Sign-in failed</em> page with a <em>Log in again</em> button (preserving the
+                original redirect) instead of the previous unstyled
+                <code>Token exchange failed</code> text.
+              </p>
+            </div>
             <div class="col-label">2025-04-22</div>
             <div class="col-main">
               <p>
