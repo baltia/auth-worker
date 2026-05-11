@@ -15,6 +15,7 @@ import {
   type SessionData,
   type SessionValidationResult,
 } from "./session";
+import type { Synology } from "arctic";
 import { createSynologyClient, fetchUserInfo } from "./synology";
 const lockIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lock-icon lucide-lock"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
 const lockOpenIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lock-open-icon lucide-lock-open"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>`;
@@ -182,6 +183,10 @@ async function handleCallback(url: URL, env: Env): Promise<Response> {
     return new Response("Missing code or state", { status: 400 });
   }
 
+  // Warm the connection to the NAS in parallel with the KV state lookup so the
+  // token exchange below doesn't pay TLS/handshake cost on a cold route.
+  const warmup = fetch(env.BASE_URL, { method: "HEAD" }).catch(() => {});
+
   const oauthState = await consumeOAuthState(env.SESSIONS, state);
   if (!oauthState) {
     return new Response("Invalid or expired state", { status: 400 });
@@ -189,18 +194,22 @@ async function handleCallback(url: URL, env: Env): Promise<Response> {
 
   const synology = createSynologyClient(env);
 
+  await warmup;
+
   let accessToken: string;
   try {
-    const tokens = await synology.validateAuthorizationCode(code, oauthState.codeVerifier);
-    accessToken = tokens.accessToken();
+    accessToken = await exchangeAuthCodeWithRetry(synology, code, oauthState.codeVerifier);
   } catch (e) {
     console.error(
-      "Token exchange failed",
+      "Token exchange failed after retry",
       String(e),
       "cause:",
       e instanceof Error ? e.cause : "N/A",
     );
-    return new Response("Token exchange failed", { status: 400 });
+    return new Response(tokenExchangeFailedPage(oauthState.redirectUrl), {
+      status: 502,
+      headers: { "Content-Type": "text/html;charset=UTF-8" },
+    });
   }
 
   let userData;
@@ -259,6 +268,28 @@ async function handleCallback(url: URL, env: Env): Promise<Response> {
   });
 }
 
+// Retry once on any error. A cold route to the NAS often fails the first request
+// even after a warmup ping; the second usually succeeds on the now-open connection.
+async function exchangeAuthCodeWithRetry(
+  synology: Synology,
+  code: string,
+  codeVerifier: string,
+): Promise<string> {
+  try {
+    const tokens = await synology.validateAuthorizationCode(code, codeVerifier);
+    return tokens.accessToken();
+  } catch (e) {
+    console.warn(
+      "Token exchange failed, retrying once",
+      String(e),
+      "cause:",
+      e instanceof Error ? e.cause : "N/A",
+    );
+    const tokens = await synology.validateAuthorizationCode(code, codeVerifier);
+    return tokens.accessToken();
+  }
+}
+
 async function handleLogout(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const redirectUrl = sanitizeRedirect(url.searchParams.get("redirect"), "/", env);
@@ -312,6 +343,26 @@ function statusPage(session: SessionData | null): string {
 h1{margin:0 0 .5rem;font-size:1.5rem}p{color:#666;margin:.5rem 0}a{color:#2563eb}
 pre{text-align:left;background:#f0f0f0;padding:1rem;border-radius:4px;overflow-x:auto;font-size:.85rem}</style>
 </head><body><div class="card">${content}</div></body></html>`;
+}
+
+function tokenExchangeFailedPage(redirectUrl: string): string {
+  const favicon = `data:image/svg+xml,${encodeURIComponent(lockOpenIcon)}`;
+  const loginUrl = `/login?redirect=${encodeURIComponent(redirectUrl)}`;
+  return `<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign-in failed</title>
+<link rel="icon" type="image/svg+xml" href="${favicon}">
+<style>body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#f5f5f5}
+.card{background:#fff;border-radius:8px;padding:2rem;box-shadow:0 1px 3px rgba(0,0,0,.1);text-align:center;max-width:400px}
+h1{margin:0 0 .5rem;font-size:1.5rem}p{color:#666;margin:.5rem 0 1.25rem}
+a.btn{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:.6rem 1.1rem;border-radius:6px;font-weight:500}
+a.btn:hover{background:#1d4ed8}</style>
+</head><body><div class="card">
+<h1>Sign-in failed</h1>
+<p>We couldn't reach the authentication server. Please try again.</p>
+<a class="btn" href="${escapeHtml(loginUrl)}">Log in again</a>
+</div></body></html>`;
 }
 
 // Prod: Domain=<cookieDomainOf(env)> shares the cookie across subdomains. Local dev: host-only, no Secure.

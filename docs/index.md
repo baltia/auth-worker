@@ -89,6 +89,8 @@ Two login flows, picked automatically by consumer origin:
 
 ## 07 / Changelog
 
+**2026-05-11** — Hardened the `/callback` token exchange against cold routes to the NAS. The worker now fires a warmup ping in parallel with the OAuth state lookup, retries the token exchange once on failure, and on persistent failure shows a styled "Sign-in failed" page with a "Log in again" button (preserving the original redirect) instead of the previous unstyled `Token exchange failed` text.
+
 **2025-04-22** — Added `getLogoutUrl` to the `AuthService` RPC surface. Logout is now symmetric with login: consumers redirect the browser to the auth worker, which clears the cookie and deletes the session from KV. `deleteSession` remains available for programmatic revocation without a browser redirect.
 
 ---
