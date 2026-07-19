@@ -17,8 +17,8 @@ import {
 } from "./session";
 import type { Synology } from "arctic";
 import { createSynologyClient, fetchUserInfo } from "./synology";
-const lockIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lock-icon lucide-lock"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
-const lockOpenIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lock-open-icon lucide-lock-open"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>`;
+const lockIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ba1904" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lock-icon lucide-lock"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
+const lockOpenIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ba1904" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lock-open-icon lucide-lock-open"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>`;
 
 // MARK: - RPC (Service Bindings)
 
@@ -318,51 +318,76 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function statusPage(session: SessionData | null): string {
-  const icon = session ? lockIcon : lockOpenIcon;
+// Baltia design tokens — mirrors ../intern-new/DESIGN.md + layout.css.
+// Closed triad: red (signal only — title block, links, focus), black (primary),
+// silver (breath). Sharp corners, Nunito body, Noto Serif headings, warm neutrals.
+const BALTIA_STYLES = `
+@font-face{font-family:'Nunito Variable';font-style:normal;font-weight:200 1000;font-display:swap;src:url(/fonts/nunito-latin-wght-normal.woff2) format('woff2-variations')}
+@font-face{font-family:'Noto Serif Variable';font-style:normal;font-weight:100 900;font-display:swap;src:url(/fonts/noto-serif-latin-wght-normal.woff2) format('woff2-variations')}
+:root{
+--background:#f5f5f5;--foreground:#0a0a0a;
+--card:#faf8f7;--border:#e2dedc;--muted:#f0edec;--muted-foreground:#6e6862;
+--primary:#171717;--primary-foreground:#f0edec;
+--baltia-red:#ba1904;--link:#ba1904;
+}
+@media(prefers-color-scheme:dark){:root{
+--background:#0a0a0a;--foreground:#f5f5f5;
+--card:#171717;--border:rgba(255,255,255,.1);--muted:#262626;--muted-foreground:#aaa49e;
+--primary:#f0edec;--primary-foreground:#171717;
+--link:#dc4326;
+}}
+body{font-family:'Nunito Variable',system-ui,sans-serif;background:var(--background);color:var(--foreground);display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:1rem;box-sizing:border-box}
+.card{background:var(--card);border:1px solid var(--border);padding:2rem;text-align:center;max-width:26rem;width:100%;box-sizing:border-box}
+h1{font-family:'Noto Serif Variable',Georgia,serif;font-weight:600;font-size:1.5rem;line-height:1.2;display:inline-block;background:var(--baltia-red);color:#fff;border-radius:2px;padding:.75rem 1rem .5rem;margin:0 0 .75rem}
+p{color:var(--muted-foreground);margin:.5rem 0;line-height:1.6}
+a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+a.btn{display:inline-block;background:var(--primary);color:var(--primary-foreground);font-weight:600;font-size:.875rem;padding:.5rem 1.25rem;margin-top:1rem;border-radius:0}
+a.btn:hover{opacity:.85;text-decoration:none}
+pre{text-align:left;background:var(--muted);padding:1rem;overflow-x:auto;font-size:.8rem;line-height:1.5}
+`;
+
+function renderPage(title: string, icon: string, content: string): string {
   const favicon = `data:image/svg+xml,${encodeURIComponent(icon)}`;
-  let content: string;
-
-  if (session) {
-    const { accessToken: _, ...safeSession } = session;
-    content = `<h1>Logged in</h1>
-       <p>Signed in as <strong>${escapeHtml(session.userName)}</strong></p>
-       <pre>${escapeHtml(JSON.stringify(safeSession, null, 2))}</pre>
-       <a href="/logout">Log out</a>`;
-  } else {
-    content = `<h1>Not logged in</h1><p><a href="/login">Log in</a></p>`;
-  }
-
   return `<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ssso-auth</title>
+<meta name="color-scheme" content="light dark">
+<title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="${favicon}">
-<style>body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#f5f5f5}
-.card{background:#fff;border-radius:8px;padding:2rem;box-shadow:0 1px 3px rgba(0,0,0,.1);text-align:center;max-width:400px}
-h1{margin:0 0 .5rem;font-size:1.5rem}p{color:#666;margin:.5rem 0}a{color:#2563eb}
-pre{text-align:left;background:#f0f0f0;padding:1rem;border-radius:4px;overflow-x:auto;font-size:.85rem}</style>
-</head><body><div class="card">${content}</div></body></html>`;
+<style>${BALTIA_STYLES}</style>
+</head><body><main class="card">${content}</main></body></html>`;
+}
+
+function statusPage(session: SessionData | null): string {
+  if (session) {
+    const { accessToken: _, ...safeSession } = session;
+    return renderPage(
+      "ssso-auth",
+      lockIcon,
+      `<h1>Logged in</h1>
+       <p>Signed in as <strong>${escapeHtml(session.userName)}</strong></p>
+       <pre>${escapeHtml(JSON.stringify(safeSession, null, 2))}</pre>
+       <a class="btn" href="/logout">Log out</a>`,
+    );
+  }
+  return renderPage(
+    "ssso-auth",
+    lockOpenIcon,
+    `<h1>Not logged in</h1>
+     <p>Sign in with your Baltia account.</p>
+     <a class="btn" href="/login">Log in</a>`,
+  );
 }
 
 function tokenExchangeFailedPage(redirectUrl: string): string {
-  const favicon = `data:image/svg+xml,${encodeURIComponent(lockOpenIcon)}`;
   const loginUrl = `/login?redirect=${encodeURIComponent(redirectUrl)}`;
-  return `<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign-in failed</title>
-<link rel="icon" type="image/svg+xml" href="${favicon}">
-<style>body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#f5f5f5}
-.card{background:#fff;border-radius:8px;padding:2rem;box-shadow:0 1px 3px rgba(0,0,0,.1);text-align:center;max-width:400px}
-h1{margin:0 0 .5rem;font-size:1.5rem}p{color:#666;margin:.5rem 0 1.25rem}
-a.btn{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:.6rem 1.1rem;border-radius:6px;font-weight:500}
-a.btn:hover{background:#1d4ed8}</style>
-</head><body><div class="card">
-<h1>Sign-in failed</h1>
-<p>We couldn't reach the authentication server. Please try again.</p>
-<a class="btn" href="${escapeHtml(loginUrl)}">Log in again</a>
-</div></body></html>`;
+  return renderPage(
+    "Sign-in failed",
+    lockOpenIcon,
+    `<h1>Sign-in failed</h1>
+     <p>We couldn't reach the authentication server. Please try again.</p>
+     <a class="btn" href="${escapeHtml(loginUrl)}">Log in again</a>`,
+  );
 }
 
 // Prod: Domain=<cookieDomainOf(env)> shares the cookie across subdomains. Local dev: host-only, no Secure.
