@@ -64,7 +64,7 @@ export default {
       case "/login":
         return handleLogin(url, env);
       case "/callback":
-        return handleCallback(url, env);
+        return handleCallback(request, env);
       case "/logout":
         return handleLogout(request, env);
       case "/favicon.ico":
@@ -79,6 +79,9 @@ export default {
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const EXCHANGE_CODE_PARAM = "__ssso_auth_code";
+// The OAuth state (and the redirect stored with it) expires after 10 minutes; this cookie
+// outlives it so a sign-in that sat too long on the SSO screen can still offer a way back.
+const LOGIN_REDIRECT_COOKIE = "login_redirect";
 
 // Strip the first DNS label from AUTH_ORIGIN: auth.example.com → .example.com.
 // Assumes the deployment lives at a subdomain and the target cookie scope is a single-label public suffix.
@@ -172,10 +175,17 @@ async function handleLogin(url: URL, env: Env): Promise<Response> {
     });
   }
 
-  return Response.redirect(authUrl.toString(), 302);
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: authUrl.toString(),
+      "Set-Cookie": buildCookie(url, LOGIN_REDIRECT_COOKIE, encodeURIComponent(redirectUrl), 60 * 60 * 24),
+    },
+  });
 }
 
-async function handleCallback(url: URL, env: Env): Promise<Response> {
+async function handleCallback(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
 
@@ -189,7 +199,20 @@ async function handleCallback(url: URL, env: Env): Promise<Response> {
 
   const oauthState = await consumeOAuthState(env.SESSIONS, state);
   if (!oauthState) {
-    return new Response("Invalid or expired state", { status: 400 });
+    const remembered = parseCookie(request.headers.get("Cookie") ?? "", LOGIN_REDIRECT_COOKIE);
+    const redirectUrl = sanitizeRedirect(
+      remembered && safeDecode(remembered),
+      env.AUTH_ORIGIN + "/",
+      env,
+    );
+    return new Response(
+      retryLoginPage(
+        "Sign-in expired",
+        "The sign-in page was open for too long. Please log in again.",
+        redirectUrl,
+      ),
+      { status: 400, headers: { "Content-Type": "text/html;charset=UTF-8" } },
+    );
   }
 
   const synology = createSynologyClient(env);
@@ -206,7 +229,12 @@ async function handleCallback(url: URL, env: Env): Promise<Response> {
       "cause:",
       e instanceof Error ? e.cause : "N/A",
     );
-    return new Response(tokenExchangeFailedPage(oauthState.redirectUrl), {
+    const page = retryLoginPage(
+      "Sign-in failed",
+      "We couldn't reach the authentication server. Please try again.",
+      oauthState.redirectUrl,
+    );
+    return new Response(page, {
       status: 502,
       headers: { "Content-Type": "text/html;charset=UTF-8" },
     });
@@ -379,29 +407,35 @@ function statusPage(session: SessionData | null): string {
   );
 }
 
-function tokenExchangeFailedPage(redirectUrl: string): string {
+function retryLoginPage(heading: string, message: string, redirectUrl: string): string {
   const loginUrl = `/login?redirect=${encodeURIComponent(redirectUrl)}`;
   return renderPage(
-    "Sign-in failed",
+    heading,
     lockOpenIcon,
-    `<h1>Sign-in failed</h1>
-     <p>We couldn't reach the authentication server. Please try again.</p>
+    `<h1>${heading}</h1>
+     <p>${message}</p>
      <a class="btn" href="${escapeHtml(loginUrl)}">Log in again</a>`,
   );
 }
 
+function buildCookie(requestUrl: URL, name: string, value: string, maxAge: number): string {
+  const parts = [`${name}=${value}`, "Path=/", "HttpOnly", "SameSite=Lax", `Max-Age=${maxAge}`];
+  if (!LOCAL_HOSTS.has(requestUrl.hostname)) parts.push("Secure");
+  return parts.join("; ");
+}
+
 // Prod: Domain=<cookieDomainOf(env)> shares the cookie across subdomains. Local dev: host-only, no Secure.
 function buildSessionCookie(requestUrl: URL, sessionId: string, maxAge: number, env: Env): string {
-  const isLocal = LOCAL_HOSTS.has(requestUrl.hostname);
-  const parts = [
-    `session_id=${sessionId}`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-    `Max-Age=${maxAge}`,
-  ];
-  if (!isLocal) parts.push(`Domain=${cookieDomainOf(env)}`, "Secure");
-  return parts.join("; ");
+  const cookie = buildCookie(requestUrl, "session_id", sessionId, maxAge);
+  return LOCAL_HOSTS.has(requestUrl.hostname) ? cookie : `${cookie}; Domain=${cookieDomainOf(env)}`;
+}
+
+function safeDecode(s: string): string | null {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return null;
+  }
 }
 
 function parseCookie(cookieHeader: string, name: string): string | null {
