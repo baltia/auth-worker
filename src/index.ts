@@ -2,15 +2,18 @@ import { generateCodeVerifier, generateState } from "arctic";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import {
+  consumeDeviceExchangeCode,
   consumeExchangeCode,
   consumeOAuthState,
   createSession,
   deleteSession as deleteSessionFromKV,
+  deleteUserSessions as deleteUserSessionsFromKV,
   generateExchangeCode,
   getSession,
+  storeDeviceExchangeCode,
   storeExchangeCode,
   storeOAuthState,
-  validateSession as validateSessionData,
+  validateAndSlideSession,
   type ExchangeResult,
   type SessionData,
   type SessionValidationResult,
@@ -27,8 +30,7 @@ export class AuthService extends WorkerEntrypoint<Env> {
     sessionId: string,
     requiredGroups?: string[],
   ): Promise<SessionValidationResult> {
-    const session = await getSession(this.env.SESSIONS, sessionId);
-    return validateSessionData(session, requiredGroups);
+    return validateAndSlideSession(this.env.SESSIONS, sessionId, requiredGroups);
   }
 
   async deleteSession(sessionId: string): Promise<void> {
@@ -50,6 +52,10 @@ export class AuthService extends WorkerEntrypoint<Env> {
   async exchangeAuthCode(code: string): Promise<ExchangeResult | null> {
     return consumeExchangeCode(this.env.SESSIONS, code);
   }
+
+  async deleteUserSessions(userId: string): Promise<void> {
+    await deleteUserSessionsFromKV(this.env.SESSIONS, userId);
+  }
 }
 
 // MARK: - HTTP (public OAuth flow)
@@ -65,6 +71,8 @@ export default {
         return handleLogin(url, env);
       case "/callback":
         return handleCallback(request, env);
+      case "/token":
+        return handleToken(request, env);
       case "/logout":
         return handleLogout(request, env);
       case "/favicon.ico":
@@ -82,6 +90,13 @@ const EXCHANGE_CODE_PARAM = "__ssso_auth_code";
 // The OAuth state (and the redirect stored with it) expires after 10 minutes; this cookie
 // outlives it so a sign-in that sat too long on the SSO screen can still offer a way back.
 const LOGIN_REDIRECT_COOKIE = "login_redirect";
+// The only source of a native redirect URI — `?client=` selects an entry, it never supplies one.
+const NATIVE_CLIENT_REDIRECTS: Record<string, string> = {
+  ios: "com.mastermakrela.baltia.intern://auth",
+};
+const EXCHANGE_CODE = /^[0-9a-f]{64}$/;
+const PKCE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/; // RFC 7636 §4.1
+const PKCE_CHALLENGE = /^[A-Za-z0-9_-]{43}$/; // base64url of a SHA-256 digest
 
 // Strip the first DNS label from AUTH_ORIGIN: auth.example.com → .example.com.
 // Assumes the deployment lives at a subdomain and the target cookie scope is a single-label public suffix.
@@ -150,11 +165,21 @@ async function handleStatus(request: Request, env: Env): Promise<Response> {
 }
 
 async function handleLogin(url: URL, env: Env): Promise<Response> {
-  const redirectUrl = sanitizeRedirect(
-    url.searchParams.get("redirect"),
-    env.AUTH_ORIGIN + "/",
-    env,
-  );
+  const client = url.searchParams.get("client");
+  const challenge = url.searchParams.get("code_challenge");
+  let redirectUrl: string;
+  if (client !== null) {
+    const nativeRedirect = Object.hasOwn(NATIVE_CLIENT_REDIRECTS, client)
+      ? NATIVE_CLIENT_REDIRECTS[client]
+      : undefined;
+    if (!nativeRedirect) return new Response("Unknown client", { status: 400 });
+    if (!challenge || !PKCE_CHALLENGE.test(challenge)) {
+      return new Response("Missing or malformed code_challenge", { status: 400 });
+    }
+    redirectUrl = nativeRedirect;
+  } else {
+    redirectUrl = sanitizeRedirect(url.searchParams.get("redirect"), env.AUTH_ORIGIN + "/", env);
+  }
 
   const synology = createSynologyClient(env);
   const state = generateState();
@@ -167,7 +192,13 @@ async function handleLogin(url: URL, env: Env): Promise<Response> {
   ]);
 
   try {
-    await storeOAuthState(env.SESSIONS, state, codeVerifier, redirectUrl);
+    await storeOAuthState(
+      env.SESSIONS,
+      state,
+      codeVerifier,
+      redirectUrl,
+      client === null ? undefined : (challenge ?? undefined),
+    );
   } catch (e) {
     console.error("Failed to store OAuth state in KV", String(e));
     return new Response("Login failed: unable to initiate authentication. Please try again.", {
@@ -189,7 +220,7 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
 
-  if (!code || !state) {
+  if (!state) {
     return new Response("Missing code or state", { status: 400 });
   }
 
@@ -215,6 +246,15 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
     );
   }
 
+  // A native login can only answer failures with the app's own redirect, never an HTTP error page.
+  const { challenge } = oauthState;
+  const fail = (message: string, status: number, errorCode: string): Response =>
+    challenge
+      ? redirectTo(`${oauthState.redirectUrl}?error=${errorCode}`)
+      : new Response(message, { status });
+
+  if (!code) return fail("Missing code or state", 400, "access_denied");
+
   const synology = createSynologyClient(env);
 
   await warmup;
@@ -229,6 +269,7 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
       "cause:",
       e instanceof Error ? e.cause : "N/A",
     );
+    if (challenge) return fail("", 502, "sso_failed");
     const page = retryLoginPage(
       "Sign-in failed",
       "We couldn't reach the authentication server. Please try again.",
@@ -250,17 +291,26 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
       "cause:",
       e instanceof Error ? e.cause : "N/A",
     );
-    return new Response("Failed to fetch user info", { status: 500 });
+    return fail("Failed to fetch user info", 500, "user_info_failed");
   }
 
   let sessionResult;
   try {
-    sessionResult = await createSession(env.SESSIONS, userData);
+    sessionResult = await createSession(env.SESSIONS, userData, Boolean(challenge));
   } catch (e) {
     console.error("Failed to create session in KV", String(e));
-    return new Response("Login failed: unable to create session. Please try again.", {
-      status: 500,
-    });
+    return fail("Login failed: unable to create session. Please try again.", 500, "session_failed");
+  }
+
+  if (challenge) {
+    const exchangeCode = generateExchangeCode();
+    try {
+      await storeDeviceExchangeCode(env.SESSIONS, exchangeCode, sessionResult, challenge);
+    } catch (e) {
+      console.error("Failed to store device exchange code in KV", String(e));
+      return fail("", 500, "session_failed");
+    }
+    return redirectTo(`${oauthState.redirectUrl}?code=${exchangeCode}`);
   }
 
   if (!isCookieReachable(oauthState.redirectUrl, env)) {
@@ -316,6 +366,33 @@ async function exchangeAuthCodeWithRetry(
     const tokens = await synology.validateAuthorizationCode(code, codeVerifier);
     return tokens.accessToken();
   }
+}
+
+// `Response.redirect` is for http(s) URLs; the native app's custom scheme goes through a plain header.
+function redirectTo(location: string): Response {
+  return new Response(null, { status: 302, headers: { Location: location } });
+}
+
+async function handleToken(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "POST") {
+    return Response.json({ error: "method_not_allowed" }, { status: 405 });
+  }
+
+  const invalid = () => Response.json({ error: "invalid_grant" }, { status: 400 });
+
+  let body: { code?: unknown; code_verifier?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return invalid();
+  }
+  const { code, code_verifier: codeVerifier } = body ?? {};
+  if (typeof code !== "string" || typeof codeVerifier !== "string") return invalid();
+  // Bounds what gets hashed and used as a KV key.
+  if (!EXCHANGE_CODE.test(code) || !PKCE_VERIFIER.test(codeVerifier)) return invalid();
+
+  const result = await consumeDeviceExchangeCode(env.SESSIONS, code, codeVerifier);
+  return result ? Response.json(result) : invalid();
 }
 
 async function handleLogout(request: Request, env: Env): Promise<Response> {

@@ -8,6 +8,8 @@ export interface SessionData {
   groups: string[];
   createdAt: number;
   expiresAt: number;
+  /** Long-lived native-app session: 90 days, extended on use. */
+  device?: true;
 }
 
 export type SessionValidationResult =
@@ -26,4 +28,6 @@ export declare class AuthService extends WorkerEntrypoint {
   getLogoutUrl(redirect?: string): Promise<string>;
   /** Returns null if the code is unknown, consumed, or expired. */
   exchangeAuthCode(code: string): Promise<ExchangeResult | null>;
+  /** Signs out every device of the user. */
+  deleteUserSessions(userId: string): Promise<void>;
 }

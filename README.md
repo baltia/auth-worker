@@ -124,6 +124,20 @@ export default {
 
 The exchange code is **single-use** and expires after **60 seconds** — if the consumer doesn't redeem it quickly, it's gone.
 
+### Native app mode (iOS)
+
+A native app cannot hold a cookie for an hour and send its user back to the browser, so it gets a
+device session: 90 days, renewed on use (at most once a day), sent as `Authorization: Bearer <sessionId>`.
+
+1. The app opens `/login?client=ios&code_challenge=<S256 challenge>` in a web authentication session.
+   Only clients in `NATIVE_CLIENT_REDIRECTS` are accepted; an unknown client or a malformed challenge is a 400.
+2. After the SSO login the worker redirects to the client's registered URL
+   (`com.mastermakrela.baltia.intern://auth?code=…`, or `?error=sso_failed|user_info_failed|session_failed|access_denied`).
+3. The app posts `{ "code", "code_verifier" }` to `POST /token` and gets `{ "sessionId", "expiresInSeconds" }`;
+   a wrong, used or expired code is a 400 `{ "error": "invalid_grant" }`. A code works once, even when the verifier is wrong.
+
+`deleteUserSessions(userId)` (RPC) ends every session of a user, device sessions included.
+
 ## Logout
 
 The auth worker can also handle logout via redirect, keeping the flow symmetric with login:
